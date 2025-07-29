@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Deep Dive: Kubernetes kube-proxy</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #181c24;
+      color: #e3e6eb;
+      line-height: 1.7;
+      min-height: 100vh;
+      transition: background 0.5s;
+      position: relative;
+      overflow-x: hidden;
+    }
+    /* Glassmorphism side panels */
+    .glass-left, .glass-right {
+      position: fixed;
+      top: 0;
+      width: 120px;
+      height: 100vh;
+      z-index: 0;
+      pointer-events: none;
+      background: rgba(40, 50, 70, 0.25);
+      box-shadow: 0 8px 32px 0 rgba(0,0,0,0.25);
+      backdrop-filter: blur(18px) saturate(160%);
+      -webkit-backdrop-filter: blur(18px) saturate(160%);
+      border-radius: 0 40px 40px 0;
+      border: 1px solid rgba(255,255,255,0.08);
+      transition: background 0.5s;
+      animation: glassFadeIn 1.2s cubic-bezier(.4,0,.2,1);
+    }
+    .glass-right {
+      right: 0;
+      left: auto;
+      border-radius: 40px 0 0 40px;
+    }
+    .glass-left {
+      left: 0;
+      right: auto;
+    }
+    @keyframes glassFadeIn {
+      from { opacity: 0; transform: translateY(40px); }
+      to { opacity: 1; transform: none; }
+    }
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 3em 2em 4em 2em;
+      background: rgba(30, 34, 44, 0.98);
+      border-radius: 18px;
+      box-shadow: 0 8px 32px 0 rgba(0,0,0,0.45);
+      animation: fadeInMain 1.2s cubic-bezier(.4,0,.2,1);
+      position: relative;
+      z-index: 1;
+    }
+    @keyframes fadeInMain {
+      from { opacity: 0; transform: translateY(40px); }
+      to { opacity: 1; transform: none; }
+    }
+    h1, h2, h3 {
+      color: #6ec1e4;
+      margin-top: 2.2em;
+      margin-bottom: 0.7em;
+      letter-spacing: 0.01em;
+      text-shadow: 0 2px 12px #0a0c12;
+      transition: color 0.4s;
+    }
+    h1 {
+      font-size: 4em;
+      margin-top: 0.5em;
+      margin-bottom: 1.2em;
+      animation: headingPopIn 1.2s cubic-bezier(.4,0,.2,1);
+      text-align: center;
+      position: relative;
+      z-index: 2;
+      background: linear-gradient(90deg, #6ec1e4 10%, #f7b731 60%, #6ec1e4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-fill-color: transparent;
+    }
+    h1::after {
+      content: "";
+      display: block;
+      margin: 0.5em auto 0 auto;
+      width: 120px;
+      height: 5px;
+      border-radius: 3px;
+      background: linear-gradient(90deg, #6ec1e4 0%, #f7b731 100%);
+      opacity: 0.7;
+      box-shadow: 0 0 16px #6ec1e488, 0 0 8px #f7b73166;
+      animation: underlineGlow 2.5s ease-in-out infinite alternate;
+    }
+    @keyframes underlineGlow {
+      0% { opacity: 0.5; box-shadow: 0 0 8px #6ec1e488, 0 0 4px #f7b73166; }
+      100% { opacity: 1; box-shadow: 0 0 24px #6ec1e4cc, 0 0 16px #f7b731cc; }
+    }
+    @keyframes headingPopIn {
+      0% { opacity: 0; transform: scale(0.7) translateY(-60px); filter: blur(8px); }
+      60% { opacity: 1; transform: scale(1.08) translateY(10px); filter: blur(0); }
+      100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+    }
+    h2 {
+      font-size: 2em;
+      animation: fadeInSection 1.2s 0.2s backwards;
+    }
+    h3 {
+      font-size: 1.3em;
+      color: #f7b731;
+      animation: fadeInSection 1.2s 0.4s backwards;
+    }
+    @keyframes fadeInSection {
+      from { opacity: 0; transform: translateX(-30px); }
+      to { opacity: 1; transform: none; }
+    }
+    ul, ol {
+      margin-left: 2em;
+      margin-bottom: 1.5em;
+    }
+    li {
+      margin-bottom: 0.5em;
+      transition: color 0.3s;
+    }
+    p, ul, ol, blockquote {
+      font-size: 1.13em;
+      animation: fadeInSection 1.2s 0.6s backwards;
+    }
+    code {
+      background: #23283a;
+      color: #f7b731;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Fira Mono', monospace;
+      font-size: 1em;
+      transition: background 0.3s;
+    }
+    blockquote {
+      border-left: 4px solid #6ec1e4;
+      background: rgba(110,193,228,0.07);
+      padding: 1em 1.5em;
+      margin: 2em 0;
+      color: #b2c7e1;
+      font-style: italic;
+      border-radius: 8px;
+      animation: fadeInSection 1.2s 0.8s backwards;
+    }
+    hr {
+      margin: 3em 0;
+      border: none;
+      border-top: 1px solid #2c3240;
+      opacity: 0.7;
+      animation: fadeInSection 1.2s 1s backwards;
+    }
+    a {
+      color: #6ec1e4;
+      text-decoration: underline;
+      transition: color 0.2s;
+    }
+    a:hover {
+      color: #f7b731;
+    }
+    /* Sparkle effect for glass panels */
+    .glass-left .sparkle, .glass-right .sparkle {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0.7;
+      background: radial-gradient(circle, #fff 0%, #6ec1e4 60%, transparent 100%);
+      animation: sparkleMove 7s linear infinite;
+    }
+    .glass-right .sparkle {
+      background: radial-gradient(circle, #fff 0%, #f7b731 60%, transparent 100%);
+    }
+    /* Multiple sparkles with different delays and positions */
+    .sparkle.s1 { width: 36px; height: 36px; left: 30px; top: 10vh; animation-delay: 0s; }
+    .sparkle.s2 { width: 24px; height: 24px; left: 70px; top: 40vh; animation-delay: 2s; }
+    .sparkle.s3 { width: 48px; height: 48px; left: 50px; top: 70vh; animation-delay: 4s; }
+    .glass-right .sparkle.s1 { left: 60px; top: 20vh; }
+    .glass-right .sparkle.s2 { left: 20px; top: 55vh; }
+    .glass-right .sparkle.s3 { left: 80px; top: 80vh; }
+    @keyframes sparkleMove {
+      0% { opacity: 0.7; transform: translateY(0) scale(1); }
+      50% { opacity: 1; transform: translateY(-30px) scale(1.2); }
+      100% { opacity: 0.5; transform: translateY(-60px) scale(0.8); }
+    }
+    @media (max-width: 700px) {
+      .glass-left, .glass-right {
+        display: none;
+      }
+      main {
+        padding: 1.2em 0.5em;
+        border-radius: 0;
+      }
+      h1 {
+        font-size: 2em;
+      }
+      h2 {
+        font-size: 1.3em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="glass-left">
+    <div class="sparkle s1"></div>
+    <div class="sparkle s2"></div>
+    <div class="sparkle s3"></div>
+  </div>
+  <div class="glass-right">
+    <div class="sparkle s1"></div>
+    <div class="sparkle s2"></div>
+    <div class="sparkle s3"></div>
+  </div>
+  <main>
+    <h1> kube-proxy</h1>
+    <h2>Module 1: The Foundational Problem and The Kubernetes Solution</h2>
+    <h3>1.1 The Ephemeral Nature of Pods</h3>
+    <p>
+      In Kubernetes, Pods are the smallest deployable units of computing. They are, by design, <em>ephemeral</em> or <em>mortal</em>. This means:
+    </p>
+    <ul>
+      <li>A Pod can be destroyed and recreated during deployments, scaling events, or node failures.</li>
+      <li>Each Pod gets a unique IP address that changes on recreation.</li>
+    </ul>
+    <p><strong>The Core Problem:</strong> How can an application like <code>frontend</code> reliably talk to a changing backend Pod IP?</p>
+    <h3>1.2 The Solution: The Kubernetes <code>Service</code> Object</h3>
+    <ul>
+      <li><code>Service</code> provides a stable <strong>ClusterIP</strong> that abstracts backend Pods.</li>
+      <li>Uses label <strong>selectors</strong> to group Pods.</li>
+      <li>Clients use DNS like <code>backend-service.default.svc.cluster.local</code>.</li>
+    </ul>
+    <h3>1.3 The Missing Link: From Virtual to Real</h3>
+    <p>
+      <strong>ClusterIP</strong> is virtual. The Linux kernel doesn’t know how to route it.
+      So how does a request to <code>10.96.10.20</code> get to a real backend Pod like <code>192.168.1.5</code>?
+    </p>
+    <p><strong>This is the fundamental role of <code>kube-proxy</code>.</strong></p>
+    <blockquote>
+      <strong>Analogy:</strong> A <code>Service</code> is like a company’s main phone number.
+      <code>Pods</code> are employees. <code>kube-proxy</code> is the phone exchange that forwards calls.
+    </blockquote>
+    <hr/>
+    <h2>Module 2: The Architecture and Core Function of <code>kube-proxy</code></h2>
+    <h3>2.1 Where and How It Runs</h3>
+    <ul>
+      <li>Runs on <strong>every node</strong> via a <code>DaemonSet</code>.</li>
+      <li>Each instance manages that node’s network translation rules.</li>
+    </ul>
+    <h3>2.2 How It Gets Information</h3>
+    <p><code>kube-proxy</code> is a <strong>network rule programmer</strong>. It watches:</p>
+    <ul>
+      <li><strong>Service</strong> objects – stable IPs and ports</li>
+      <li><strong>EndpointSlice</strong> objects – list of live backend Pods</li>
+    </ul>
+    <h3>2.3 What It Does with the Information</h3>
+    <p>
+      Once it receives updated state, it programs the host’s networking stack (like <code>iptables</code> or <code>IPVS</code>)
+      to handle routing and load balancing.
+    </p>
+    <p>This ensures the kernel handles traffic forwarding efficiently without <code>kube-proxy</code> being in the data path.</p>
+    <hr/>
+    <h2>Module 3: The <code>kube-proxy</code> Operational Modes (The Deep Dive)</h2>
+    <h3>3.1 <code>userspace</code> Mode (Legacy/Deprecated)</h3>
+    <p>This was the original mode and is now deprecated. Summary:</p>
+    <ul>
+      <li>Listens on high ports locally</li>
+      <li>Traffic routed to <code>kube-proxy</code> which then opens new connection to backend Pod</li>
+    </ul>
+    <p><strong>Flow:</strong> Client Pod → Kernel (DNAT) → kube-proxy process → Backend Pod</p>
+    <p><strong>Why it’s bad:</strong> Very inefficient – packets cross userspace boundary twice.</p>
+    <h3>3.2 <code>iptables</code> Mode (The Long-time Default)</h3>
+    <p>Efficient mode using Linux kernel’s <strong>Netfilter</strong> framework:</p>
+    <ol>
+      <li>Packet hits <code>PREROUTING</code> or <code>OUTPUT</code> chain</li>
+      <li>Jumps to <code>KUBE-SERVICES</code> chain</li>
+      <li>Then to <code>KUBE-SVC-XYZ</code> – the service-specific chain</li>
+      <li>Implements probabilistic load balancing with <code>KUBE-SEP-*</code> chains</li>
+    </ol>
+    <p>All routing happens in-kernel, no user-space forwarding needed.</p>
+    <!-- You can continue Module 3 with the remaining modes like IPVS and eBPF similarly -->
+  </main>
+</body>
+</html>
