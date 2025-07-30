@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- [existing head content remains unchanged] -->
+</head>
+<body>
+  <div class="glass-left">
+    <!-- [glass sparkle left] -->
+  </div>
+  <div class="glass-right">
+    <!-- [glass sparkle right] -->
+  </div>
+  <main>
+    <h1>kube-proxy</h1>
+
+    <!-- [existing modules 1-3 content remains unchanged] -->
+
+    <hr/>
+    <h2>Module 4: Hands-On with kube-proxy and Service Routing</h2>
+    <h3>4.1 Debugging kube-proxy and Network Flow</h3>
+    <ul>
+      <li>Run an ephemeral debug pod in the <code>test-k-proxy</code> namespace:
+        <pre><code>kubectl run -i --tty --rm debug \ 
+  --image=busybox \
+  --restart=Never \
+  --namespace=test-k-proxy \
+  -- sh</code></pre>
+      </li>
+      <li>Check kube-proxy logs:
+        <pre><code>kubectl logs -n kube-system -l k8s-app=kube-proxy --all-containers</code></pre>
+      </li>
+      <li>Inspect iptables NAT rules:
+        <pre><code>sudo iptables -L -t nat -v</code></pre>
+      </li>
+      <li>Edit the kube-proxy configmap (e.g., switch to IPVS mode):
+        <pre><code>kubectl edit configmap kube-proxy -n kube-system</code></pre>
+      </li>
+      <li>Check IPVS rules if using IPVS mode:
+        <pre><code>ipvsadm -Ln</code></pre>
+      </li>
+      <li>Restart kube-proxy to apply changes:
+        <pre><code>kubectl delete pod -n kube-system -l k8s-app=kube-proxy</code></pre>
+      </li>
+    </ul>
+
+    <h3>4.2 Observing kube-proxy in Containerized Kubernetes (Kind / Docker)</h3>
+    <ul>
+      <li>List Docker containers for your cluster:
+        <pre><code>docker ps --filter "name=test-cluster"</code></pre>
+      </li>
+      <li>Access worker and control-plane nodes:
+        <pre><code>docker exec -it test-cluster-worker /bin/bash
+journalctl -u kube-proxy
+ps aux | grep kube
+iptables -L -t nat -v
+ipvsadm -Ln</code></pre>
+      </li>
+      <li>Optional: Explore other nodes:
+        <pre><code>docker exec -it test-cluster-control-plane /bin/bash
+docker exec -it test-cluster-worker2 /bin/bash</code></pre>
+      </li>
+    </ul>
+
+    <h3>4.3 Node Affinity and Service Behavior Testing</h3>
+    <ul>
+      <li>Label nodes for controlled routing:
+        <pre><code>kubectl label nodes test-cluster-worker app=nginx1
+kubectl label nodes test-cluster-worker2 app=nginx2</code></pre>
+      </li>
+      <li>Check deployment pod spread:
+        <pre><code>kgp -l app=nginx -o wide</code></pre>
+      </li>
+      <li>Inspect the service routing:
+        <pre><code>kubectl get svc -n default</code></pre>
+      </li>
+      <li>Send requests from a debug pod:
+        <pre><code>kubectl run -i --tty --rm debug --image=busybox --restart=Never -- sh
+wget -O- http://nginx-service</code></pre>
+      </li>
+      <li>Modify content served by pods to identify responses:
+        <pre><code>kubectl exec nginx1 -- /bin/sh -c 'echo "Served by nginx1 on test-cluster-worker" > /usr/share/nginx/html/index.html'
+kubectl exec nginx2 -- /bin/sh -c 'echo "Served by nginx2 on test-cluster-worker2" > /usr/share/nginx/html/index.html'</code></pre>
+        <p>Then run:</p>
+        <pre><code>wget -O- http://nginx-service</code></pre>
+      </li>
+    </ul>
+  </main>
+</body>
+</html>
